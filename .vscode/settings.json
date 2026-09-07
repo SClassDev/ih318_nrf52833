@@ -1,0 +1,7 @@
+{
+    "nrf-connect.debugging.bindings": {
+        "${workspaceFolder}/build": "Launch ih318_nrf52833/build",
+        "${workspaceFolder}/build/ih318_nrf52833/tfm": "Launch ih318_nrf52833/build/ih318_nrf52833/tfm",
+        "${workspaceFolder}/build/ipc_radio": "Launch ih318_nrf52833/build/ipc_radio"
+    }
+}

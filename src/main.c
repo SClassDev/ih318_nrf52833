@@ -15,26 +15,66 @@
 #include <zephyr/bluetooth/hci.h>
 #include <bluetooth/services/nus.h>
 #include <zephyr/logging/log.h>
-#include <shell/shell_bt_nus.h>
+// #include <shell/shell_bt_nus.h>
 #include <stdio.h>
+
+#include "shell_custom.h"
+#include <zephyr/drivers/uart.h>
 
 LOG_MODULE_REGISTER(app);
 
 #define DEVICE_NAME             CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN	        (sizeof(DEVICE_NAME) - 1)
 
+// #define Manufacturer specific data
+#define COMPANY_ID_CODE 0x0971
+#define UUID_LENGTH 16
+
+/* Bit definitions of hardware features */
+#define HW_PulseCapacitor                    0x00000001      /* If device has C300 */
+#define HW_Bluetooth                         0x00000002      /* If device has bluetooth interface */
+#define HW_BME280                            0x00000004      /* If device has Bosch BME280 sensor */
+#define HW_ExternalFlash                     0x00000008      /* If device has external flash */
+#define HW_eSim                              0x00000010      /* If device has embedded SIM card */
+#define DEVICE_TypeIH318 0x00010000      /* ih318 HW board revision 1 */
+#define DEVICE_HardwareFeatures HW_BME280 | HW_ExternalFlash
+#define HW_Version_1 0x00000100      /* Version 1 */
+#define DEVICE_DESCRIPTOR DEVICE_TypeIH318 | DEVICE_HardwareFeatures | HW_Version_1
+
+typedef struct adv_mfg_data {
+	uint32_t companyId;
+	uint32_t deviceDescriptor;
+	uint8_t uuid_bytes[UUID_LENGTH]; /* Number of times Button 1 is pressed */
+} adv_mfg_data_type;
+static adv_mfg_data_type adv_mfg_data = { COMPANY_ID_CODE, DEVICE_DESCRIPTOR, {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF} };
+	
+
+const struct device *lpuart = DEVICE_DT_GET(DT_NODELABEL(lpuart));
 
 static struct bt_conn *current_conn;
 static struct k_work adv_work;
 
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-	BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
+	BT_DATA(BT_DATA_MANUFACTURER_DATA, (unsigned char *)&adv_mfg_data, sizeof(adv_mfg_data)),
 };
 
 static const struct bt_data sd[] = {
+	BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_VAL),
 };
+
+static int cmd_version(const struct shell *sh, size_t argc, char **argv)
+{
+        ARG_UNUSED(argc);
+        ARG_UNUSED(argv);
+
+		bt_nus_send(NULL, "001 1.8.3\r\n", strlen("001 1.8.3\r\n"));
+
+        return 0;
+}
+SHELL_CMD_REGISTER(version, NULL, "Show kernel version", cmd_version);
+
 
 static void adv_work_handler(struct k_work *work)
 {
@@ -62,14 +102,14 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 	LOG_INF("Connected");
 	current_conn = bt_conn_ref(conn);
-	shell_bt_nus_enable(conn);
+	//shell_bt_nus_enable(conn);
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
 	LOG_INF("Disconnected, reason 0x%02x %s", reason, bt_hci_err_to_str(reason));
 
-	shell_bt_nus_disable();
+	//shell_bt_nus_disable();
 	if (current_conn) {
 		bt_conn_unref(current_conn);
 		current_conn = NULL;
@@ -144,11 +184,19 @@ static struct bt_conn_auth_info_cb conn_auth_info_callbacks = {
 	.pairing_failed = pairing_failed
 };
 
+static void setup_lpuart(const struct device *dev)
+{
+	uart_irq_callback_set(dev, lpuart_irq_handler);
+	uart_irq_rx_enable(dev);
+}
+
 int main(void)
 {
 	int err;
 
 	printk("Starting Bluetooth NUS shell transport sample\n");
+
+	setup_lpuart(lpuart);
 
 	if (IS_ENABLED(CONFIG_BT_SMP)) {
 		err = bt_conn_auth_cb_register(&conn_auth_callbacks);
@@ -170,7 +218,7 @@ int main(void)
 		return 0;
 	}
 
-	err = shell_bt_nus_init();
+	err = cust_bt_nus_init();
 	if (err) {
 		LOG_ERR("Failed to initialize BT NUS shell (err: %d)", err);
 		return 0;
@@ -178,6 +226,13 @@ int main(void)
 
 	k_work_init(&adv_work, adv_work_handler);
 	advertising_start();
+
+	while (1)
+	{
+		
+		// send_alive_message();
+		k_sleep(K_MSEC(3000));
+	}
 
 	return 0;
 }

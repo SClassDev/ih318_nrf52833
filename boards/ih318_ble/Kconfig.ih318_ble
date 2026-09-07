@@ -1,0 +1,2 @@
+config BOARD_IH318_BLE
+	select SOC_NRF52833_QDAA

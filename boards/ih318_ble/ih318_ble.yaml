@@ -1,0 +1,10 @@
+identifier: ih318_ble/nrf52833
+name: ih318 Bluetooth 
+vendor: Ihlu
+type: mcu
+arch: arm
+ram: 128
+flash: 512
+toolchain:
+  - zephyr
+supported: []
