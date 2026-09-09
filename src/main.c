@@ -42,7 +42,7 @@ LOG_MODULE_REGISTER(app);
 #define DEVICE_DESCRIPTOR DEVICE_TypeIH318 | DEVICE_HardwareFeatures | HW_Version_1
 
 typedef struct adv_mfg_data {
-	uint32_t companyId;
+	uint16_t companyId;
 	uint32_t deviceDescriptor;
 	uint8_t uuid_bytes[UUID_LENGTH]; /* Number of times Button 1 is pressed */
 } adv_mfg_data_type;
@@ -189,7 +189,7 @@ static void setup_lpuart(const struct device *dev)
 	uart_irq_callback_set(dev, lpuart_irq_handler);
 	uart_irq_rx_enable(dev);
 }
-
+ 
 int main(void)
 {
 	int err;
@@ -227,12 +227,14 @@ int main(void)
 	k_work_init(&adv_work, adv_work_handler);
 	advertising_start();
 
+	/*
 	while (1)
 	{
 		
 		// send_alive_message();
-		k_sleep(K_MSEC(3000));
+		// k_sleep(K_MSEC(3000));
+		k_sleep(K_FOREVER);
 	}
-
+	*/
 	return 0;
 }

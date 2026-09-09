@@ -6,6 +6,7 @@
 #include <shell_custom.h>
 #include <zephyr/drivers/uart.h>
 
+
 #define QUEUE_SIZE 128
 struct data_item_type {
     uint32_t length;
