@@ -4,3 +4,6 @@
 
 # build
 /build*/
+
+# local MCP server
+/.mcp/

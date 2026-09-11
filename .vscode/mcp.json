@@ -1,0 +1,14 @@
+{
+	"servers": {
+		"nrf-mcp": {
+			"type": "stdio",
+			"command": "node",
+			"args": [
+				"${workspaceFolder}/.mcp/nrf-mcp/dist/index.js"
+			],
+			"env": {
+				"GITHUB_TOKEN": "${env:GITHUB_TOKEN}"
+			}
+		}
+	}
+}

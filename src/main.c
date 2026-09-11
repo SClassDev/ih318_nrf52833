@@ -15,6 +15,9 @@
 #include <zephyr/bluetooth/hci.h>
 #include <bluetooth/services/nus.h>
 #include <zephyr/logging/log.h>
+#include <hal/nrf_ficr.h> // Header für den Zugriff auf die nRF-Hardware-Register
+
+
 // #include <shell/shell_bt_nus.h>
 #include <stdio.h>
 
@@ -41,6 +44,7 @@ LOG_MODULE_REGISTER(app);
 #define HW_Version_1 0x00000100      /* Version 1 */
 #define DEVICE_DESCRIPTOR DEVICE_TypeIH318 | DEVICE_HardwareFeatures | HW_Version_1
 
+
 typedef struct adv_mfg_data {
 	uint16_t companyId;
 	uint32_t deviceDescriptor;
@@ -49,7 +53,7 @@ typedef struct adv_mfg_data {
 static adv_mfg_data_type adv_mfg_data = { COMPANY_ID_CODE, DEVICE_DESCRIPTOR, {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF} };
 	
 
-const struct device *lpuart = DEVICE_DT_GET(DT_NODELABEL(lpuart));
+/* DEBUG const struct device *lpuart = DEVICE_DT_GET(DT_NODELABEL(lpuart)); */
 
 static struct bt_conn *current_conn;
 static struct k_work adv_work;
@@ -64,6 +68,7 @@ static const struct bt_data sd[] = {
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_VAL),
 };
 
+/* DEBUG
 static int cmd_version(const struct shell *sh, size_t argc, char **argv)
 {
         ARG_UNUSED(argc);
@@ -74,7 +79,28 @@ static int cmd_version(const struct shell *sh, size_t argc, char **argv)
         return 0;
 }
 SHELL_CMD_REGISTER(version, NULL, "Show kernel version", cmd_version);
+*/
 
+/* 1. Funktion zur Berechnung des Passkeys aus der Device ID */
+uint32_t generate_passkey_from_device_id(void) {
+    
+	uint32_t calculated_passkey = 0;
+	
+	// Die nRF52 Device ID ist aufgeteilt in zwei 32-Bit Register
+    uint32_t dev_id_0 = nrf_ficr_deviceid_get(NRF_FICR, 0);
+    uint32_t dev_id_1 = nrf_ficr_deviceid_get(NRF_FICR, 1);
+
+    // Verknüpfung der beiden IDs (z.B. per XOR)
+    uint32_t combined_id = dev_id_0 ^ dev_id_1;
+
+    // Ein BLE-Passkey MUSS exakt zwischen 000000 und 999999 liegen.
+    // Modulo 1.000.000 erzwingt genau diesen 6-stelligen Bereich.
+    calculated_passkey = combined_id % 1000000;
+
+    printk("Generierter Hardware-Passkey: %06u\n", calculated_passkey);
+
+	return (calculated_passkey);
+}
 
 static void adv_work_handler(struct k_work *work)
 {
@@ -102,6 +128,12 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 	LOG_INF("Connected");
 	current_conn = bt_conn_ref(conn);
+
+	int security_err = bt_conn_set_security(conn, BT_SECURITY_L3);
+	if (security_err) {
+    	LOG_ERR("Security request failed: %d", security_err);
+	}
+
 	//shell_bt_nus_enable(conn);
 }
 
@@ -174,8 +206,19 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
 		bt_security_err_to_str(reason));
 }
 
+/* Define fixed passkey for authentication, Later from uuid */
+#define FIXED_PASSKEY 123456U
+
+static uint32_t auth_passkey(struct bt_conn *conn)
+{
+	ARG_UNUSED(conn);
+	return FIXED_PASSKEY;
+    // return generate_passkey_from_device_id();
+}
+
 static struct bt_conn_auth_cb conn_auth_callbacks = {
 	.passkey_display = auth_passkey_display,
+	.app_passkey = auth_passkey,
 	.cancel = auth_cancel,
 };
 
@@ -184,11 +227,13 @@ static struct bt_conn_auth_info_cb conn_auth_info_callbacks = {
 	.pairing_failed = pairing_failed
 };
 
+/* DEBUG
 static void setup_lpuart(const struct device *dev)
 {
 	uart_irq_callback_set(dev, lpuart_irq_handler);
 	uart_irq_rx_enable(dev);
 }
+*/
  
 int main(void)
 {
@@ -196,7 +241,7 @@ int main(void)
 
 	printk("Starting Bluetooth NUS shell transport sample\n");
 
-	setup_lpuart(lpuart);
+	/* DEBUG setup_lpuart(lpuart); */
 
 	if (IS_ENABLED(CONFIG_BT_SMP)) {
 		err = bt_conn_auth_cb_register(&conn_auth_callbacks);
@@ -218,7 +263,7 @@ int main(void)
 		return 0;
 	}
 
-	err = cust_bt_nus_init();
+	/* DEBUG err = cust_bt_nus_init(); */
 	if (err) {
 		LOG_ERR("Failed to initialize BT NUS shell (err: %d)", err);
 		return 0;
@@ -238,3 +283,5 @@ int main(void)
 	*/
 	return 0;
 }
+
+

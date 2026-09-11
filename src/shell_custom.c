@@ -6,6 +6,9 @@
 #include <shell_custom.h>
 #include <zephyr/drivers/uart.h>
 
+/* DEBUG */
+#define test
+#ifdef test
 
 #define QUEUE_SIZE 128
 struct data_item_type {
@@ -120,3 +123,4 @@ void send_alive_message(void)
 	bt_nus_send(NULL, quePutData.data, quePutData.length);
 
 }
+#endif
