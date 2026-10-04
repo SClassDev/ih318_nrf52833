@@ -12,9 +12,12 @@
  * It includes necessary Zephyr headers and declares the initialization function
  * and UART interrupt handler for the custom transport.
  ***********************************************************************/
+
+
+void read_uuid (void);
+void set_bt_enabled (void);
+void set_bt_disabled (void);
 int cust_bt_nus_init(void);
-
 void lpuart_irq_handler(const struct device *dev, void *context);
-
 void send_alive_message(void);
 #endif /* SHELL_CUST_BT_NUS_H_ */

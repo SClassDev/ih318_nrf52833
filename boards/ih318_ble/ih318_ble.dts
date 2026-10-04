@@ -3,14 +3,99 @@
 #include "ih318_ble-pinctrl.dtsi"
 
 / {
-	model = "ih318 Bluetooth ";
+	model = "ih318 Bluetooth";
 	compatible = "Ihlu,ih318-ble";
 
 	chosen {
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
 		zephyr,code-partition = &slot0_partition;
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
+		zephyr,uart = &uart0;
+		zephyr,lpuart = &lpuart;
 	};
+
+	aliases {
+		uart1 = &uart1;
+		watchdog0 = &wdt0;
+	};
+
+	nrf_radio_fem: nrf21540 {
+		compatible = "nordic,nrf21540-fem";
+		tx-en-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
+		rx-en-gpios = <&gpio0 28 GPIO_ACTIVE_HIGH>;
+		pdn-gpios = <&gpio0 11 GPIO_ACTIVE_HIGH>;
+		ant-sel-gpios = <&gpio0 2 GPIO_ACTIVE_HIGH>;
+		mode-gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;
+		supply-voltage-mv = <1800>;
+		tx-en-settle-time-us = <11>;
+		rx-en-settle-time-us = <11>;
+		pdn-settle-time-us = <18>;
+		trx-hold-time-us = <3>;
+		spi-if = <&nrf_radio_fem_spi>;
+		zephyr,pm-device-runtime-auto;
+	};
+};
+
+&gpiote {
+	status = "okay";
+	interrupts = <6 1>;
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&gpio1 {
+	status = "okay";
+};
+
+&uart0 {
+	compatible = "nordic,nrf-uarte";
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uart0_default>;
+	pinctrl-1 = <&uart0_sleep>;
+	// pinctrl-0 = <&uart0_default_dk>;
+	// pinctrl-1 = <&uart0_sleep_dk>;
+	pinctrl-names = "default", "sleep";
+};
+
+&uart1 {
+	compatible = "nordic,nrf-uarte";
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uart1_default>;
+	pinctrl-1 = <&uart1_sleep>;
+	pinctrl-names = "default", "sleep";
+
+	lpuart: nrf-sw-lpuart {
+		compatible = "nordic,nrf-sw-lpuart";
+		status = "okay";
+		req-pin = <20>;
+		rdy-pin = <15>;
+		wakeup-source;
+	};
+};
+
+&spi1 {
+	status = "okay";
+	pinctrl-0 = <&spi1_default>;
+	pinctrl-1 = <&spi1_sleep>;
+	pinctrl-names = "default", "sleep";
+	cs-gpios = <&gpio0 31 GPIO_ACTIVE_LOW>;
+
+	nrf_radio_fem_spi: nrf21540_fem_spi@0 {
+		compatible = "nordic,nrf21540-fem-spi";
+		reg = <0>;
+		status = "okay";
+		spi-max-frequency = <8000000>;
+	};
+};
+
+&radio {
+	fem = <&nrf_radio_fem>;
 };
 
 &flash0 {

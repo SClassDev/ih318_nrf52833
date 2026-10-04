@@ -9,14 +9,16 @@
  */
 
 #include <zephyr/kernel.h>
+#include <errno.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/hci.h>
+#include <zephyr/shell/shell.h>
 #include <bluetooth/services/nus.h>
 #include <zephyr/logging/log.h>
 #include <hal/nrf_ficr.h> // Header für den Zugriff auf die nRF-Hardware-Register
-
+#include "main.h"
 
 // #include <shell/shell_bt_nus.h>
 #include <stdio.h>
@@ -29,9 +31,7 @@ LOG_MODULE_REGISTER(app);
 #define DEVICE_NAME             CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN	        (sizeof(DEVICE_NAME) - 1)
 
-// #define Manufacturer specific data
-#define COMPANY_ID_CODE 0x0971
-#define UUID_LENGTH 16
+
 
 /* Bit definitions of hardware features */
 #define HW_PulseCapacitor                    0x00000001      /* If device has C300 */
@@ -45,18 +45,17 @@ LOG_MODULE_REGISTER(app);
 #define DEVICE_DESCRIPTOR DEVICE_TypeIH318 | DEVICE_HardwareFeatures | HW_Version_1
 
 
-typedef struct adv_mfg_data {
-	uint16_t companyId;
-	uint32_t deviceDescriptor;
-	uint8_t uuid_bytes[UUID_LENGTH]; /* Number of times Button 1 is pressed */
-} adv_mfg_data_type;
-static adv_mfg_data_type adv_mfg_data = { COMPANY_ID_CODE, DEVICE_DESCRIPTOR, {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF} };
+adv_mfg_data_type adv_mfg_data = { COMPANY_ID_CODE, DEVICE_DESCRIPTOR, {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF} };
 	
-
-/* DEBUG const struct device *lpuart = DEVICE_DT_GET(DT_NODELABEL(lpuart)); */
+/** @brief LPUART device instance */
+const struct device *lpuart = DEVICE_DT_GET(DT_NODELABEL(lpuart)); 
 
 static struct bt_conn *current_conn;
 static struct k_work adv_work;
+static struct k_work_delayable nus_send_work;
+static bt_addr_le_t nus_peer_addr;
+
+uint8_t uuidBytes[16];
 
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
@@ -68,18 +67,18 @@ static const struct bt_data sd[] = {
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_NUS_VAL),
 };
 
-/* DEBUG
+/* Command shell registration */
 static int cmd_version(const struct shell *sh, size_t argc, char **argv)
 {
         ARG_UNUSED(argc);
         ARG_UNUSED(argv);
 
-		bt_nus_send(NULL, "001 1.8.3\r\n", strlen("001 1.8.3\r\n"));
+		bt_nus_send(NULL, "+version BLE 1.8.3\r\n", strlen("+version BLE 1.8.3\r\n"));
 
         return 0;
 }
 SHELL_CMD_REGISTER(version, NULL, "Show kernel version", cmd_version);
-*/
+
 
 /* 1. Funktion zur Berechnung des Passkeys aus der Device ID */
 uint32_t generate_passkey_from_device_id(void) {
@@ -119,6 +118,26 @@ static void advertising_start(void)
 	k_work_submit(&adv_work);
 }
 
+static void nus_send_work_handler(struct k_work *work)
+{
+	static const char message[] = "SEED\r\n";
+	struct bt_conn *conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &nus_peer_addr);
+	int err;
+
+	if (!conn) {
+		return;
+	}
+
+	err = bt_nus_send(conn, message, sizeof(message) - 1);
+	bt_conn_unref(conn);
+
+	if (err == -EINVAL) {
+		k_work_reschedule(&nus_send_work, K_MSEC(250));
+	} else if (err) {
+		LOG_ERR("NUS send failed (err %d)", err);
+	}
+}
+
 static void connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err) {
@@ -128,20 +147,28 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
 	LOG_INF("Connected");
 	current_conn = bt_conn_ref(conn);
+	bt_addr_le_copy(&nus_peer_addr, bt_conn_get_dst(conn));
 
-	int security_err = bt_conn_set_security(conn, BT_SECURITY_L3);
+	set_bt_enabled ();
+	k_work_reschedule(&nus_send_work, K_SECONDS(1));
+
+	/*
+	int security_err = bt_conn_set_security(conn, BT_SECURITY_L2);
 	if (security_err) {
     	LOG_ERR("Security request failed: %d", security_err);
 	}
-
-	//shell_bt_nus_enable(conn);
+    */
+	// shell_bt_nus_enable(conn);
+	// bt_nus_send(conn, "SEED", strlen("SEED"));
+	
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
 	LOG_INF("Disconnected, reason 0x%02x %s", reason, bt_hci_err_to_str(reason));
+	k_work_cancel_delayable(&nus_send_work);
 
-	//shell_bt_nus_disable();
+	// shell_bt_nus_disable();
 	if (current_conn) {
 		bt_conn_unref(current_conn);
 		current_conn = NULL;
@@ -182,7 +209,7 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.disconnected = disconnected,
 	.recycled     = recycled_cb,
 	COND_CODE_1(CONFIG_BT_SMP,
-		    (.security_changed = security_changed), ())
+		(.security_changed = security_changed), ())
 };
 
 static void auth_passkey_display(struct bt_conn *conn, unsigned int passkey)
@@ -218,7 +245,7 @@ static uint32_t auth_passkey(struct bt_conn *conn)
 
 static struct bt_conn_auth_cb conn_auth_callbacks = {
 	.passkey_display = auth_passkey_display,
-	.app_passkey = auth_passkey,
+	// .app_passkey = auth_passkey,
 	.cancel = auth_cancel,
 };
 
@@ -227,21 +254,30 @@ static struct bt_conn_auth_info_cb conn_auth_info_callbacks = {
 	.pairing_failed = pairing_failed
 };
 
-/* DEBUG
 static void setup_lpuart(const struct device *dev)
 {
 	uart_irq_callback_set(dev, lpuart_irq_handler);
 	uart_irq_rx_enable(dev);
 }
-*/
+
  
 int main(void)
 {
 	int err;
 
+	/* Wait for 2 seconds before talking to the LTE modem */
+	k_sleep(K_MSEC(2000));
+
 	printk("Starting Bluetooth NUS shell transport sample\n");
 
-	/* DEBUG setup_lpuart(lpuart); */
+	/* Initialize Bluetooth enabled flag */
+	set_bt_disabled ();
+
+	/* Setup LPUART for communication with LTE */
+	setup_lpuart(lpuart);
+	
+	/* Reed uuis from LTE */
+	read_uuid ();
 
 	if (IS_ENABLED(CONFIG_BT_SMP)) {
 		err = bt_conn_auth_cb_register(&conn_auth_callbacks);
@@ -257,30 +293,43 @@ int main(void)
 		}
 	}
 
+	/* Must be initialized before enabling Bluetooth */
+	err = cust_bt_nus_init(); 
+	if (err) {
+		LOG_ERR("Failed to initialize BT NUS shell (err: %d)", err);
+		return 0;
+	}
+
+	/* Enable Bluetooth */
 	err = bt_enable(NULL);
 	if (err) {
 		LOG_ERR("BLE enable failed (err: %d)", err);
 		return 0;
 	}
 
-	/* DEBUG err = cust_bt_nus_init(); */
-	if (err) {
-		LOG_ERR("Failed to initialize BT NUS shell (err: %d)", err);
-		return 0;
-	}
-
-	k_work_init(&adv_work, adv_work_handler);
-	advertising_start();
-
 	/*
-	while (1)
-	{
-		
-		// send_alive_message();
-		// k_sleep(K_MSEC(3000));
-		k_sleep(K_FOREVER);
+	err = bt_unpair(BT_ID_DEFAULT, BT_ADDR_LE_ANY);
+	if (err) {
+		LOG_ERR("Failed to clear Bluetooth pairing information (err: %d)", err);
+	} else {
+		LOG_INF("Bluetooth pairing information cleared");
 	}
 	*/
+	
+	k_work_init(&adv_work, adv_work_handler);
+	k_work_init_delayable(&nus_send_work, nus_send_work_handler);
+	advertising_start();
+
+	/* TEST 
+	while (1)
+	{
+		// send_alive_message();
+		// k_sleep(K_MSEC(3000));
+		// bt_nus_send(NULL, "SEED\r\n", strlen("SEED\r\n"));
+		// k_sleep(K_SECONDS(3));
+	}
+	*/
+	k_sleep(K_FOREVER);
 	return 0;
 }
 
