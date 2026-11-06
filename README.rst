@@ -38,6 +38,34 @@ Building and running
 Testing
 *******
 
+LPUART diagnostics
+==================
+
+The LTE link uses the interrupt-driven API of ``nordic,nrf-sw-lpuart``
+on UART1. UART1 itself must keep using the asynchronous API.
+Startup checks device readiness and callback registration before requesting
+the modem UUID. Failures are reported through the application log.
+
+Startup also requests ``adc`` from the LTE modem. The response format is
+``+adc <adc0> <adc1> <powerSource>`` (decimal values, without a colon).
+For example, ``+adc 3584 14 0`` sets ``adcBytes`` to ``{3584, 14}``
+and ``powerSource`` to ``0``. Incomplete or malformed responses are logged.
+
+Set a breakpoint in ``lpuart_irq_handler`` before resetting the device.
+The initial UUID request enables TX, which schedules the callback through
+the driver's timer even before the peer acknowledges the transfer.
+Enabling RX alone does not invoke the callback without received data.
+RX data is drained inside the callback and queued for processing in the
+system workqueue.
+
+If the callback runs but the UUID request times out, check the peer's LPUART
+configuration and the crossed TX/RX and REQ/RDY connections. The nRF52833
+uses P0.18 for TX, P0.17 for RX, P0.20 for REQ and P0.15 for RDY, at
+115200 baud. A plain UART peer without the LPUART handshake is insufficient.
+
+Bluetooth NUS testing
+=====================
+
 The |NCS| provides two alternatives for testing the sample:
 
 * `Testing using the shell_bt_nus script`_. It is a Python 3 script that requires a console application, like PuTTY, and a second development kit.

@@ -15,6 +15,8 @@
 
 
 void read_uuid (void);
+int nrf_modem_uart_msg (void *buf, size_t len, const char *fmt, ...);
+int uuid_str_to_bytes(const char *uuid_str, uint8_t *uuid_bytes);
 void set_bt_enabled (void);
 void set_bt_disabled (void);
 int cust_bt_nus_init(void);

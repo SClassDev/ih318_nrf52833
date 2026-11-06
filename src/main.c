@@ -22,6 +22,7 @@
 
 // #include <shell/shell_bt_nus.h>
 #include <stdio.h>
+#include <inttypes.h>
 
 #include "shell_custom.h"
 #include <zephyr/drivers/uart.h>
@@ -56,6 +57,8 @@ static struct k_work_delayable nus_send_work;
 static bt_addr_le_t nus_peer_addr;
 
 uint8_t uuidBytes[16];
+uint16_t adcBytes[2];
+uint8_t powerSource;	
 
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
@@ -79,6 +82,23 @@ static int cmd_version(const struct shell *sh, size_t argc, char **argv)
 }
 SHELL_CMD_REGISTER(version, NULL, "Show kernel version", cmd_version);
 
+static int cmd_uuid(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	char uuid_string[46];
+
+	snprintk(uuid_string, sizeof(uuid_string),
+		 "+uuid: %02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x\r\n",
+		 uuidBytes[0], uuidBytes[1], uuidBytes[2], uuidBytes[3],
+		 uuidBytes[4], uuidBytes[5], uuidBytes[6], uuidBytes[7],
+		 uuidBytes[8], uuidBytes[9], uuidBytes[10], uuidBytes[11],
+		 uuidBytes[12], uuidBytes[13], uuidBytes[14], uuidBytes[15]);
+	bt_nus_send(NULL, uuid_string, strlen(uuid_string));
+
+	return 0;
+}
+SHELL_CMD_REGISTER(uuid, NULL, "Show device UUID", cmd_uuid);
 
 /* 1. Funktion zur Berechnung des Passkeys aus der Device ID */
 uint32_t generate_passkey_from_device_id(void) {
@@ -254,16 +274,32 @@ static struct bt_conn_auth_info_cb conn_auth_info_callbacks = {
 	.pairing_failed = pairing_failed
 };
 
-static void setup_lpuart(const struct device *dev)
+static int setup_lpuart(const struct device *dev)
 {
-	uart_irq_callback_set(dev, lpuart_irq_handler);
+	int err;
+
+	if (!device_is_ready(dev)) {
+		LOG_ERR("LPUART device %s is not ready", dev->name);
+		return -ENODEV;
+	}
+
+	err = uart_irq_callback_user_data_set(dev, lpuart_irq_handler, NULL);
+	if (err) {
+		LOG_ERR("Failed to register LPUART IRQ callback (err: %d)", err);
+		return err;
+	}
+
 	uart_irq_rx_enable(dev);
+	LOG_INF("LPUART IRQ callback registered on %s", dev->name);
+	return 0;
 }
 
  
 int main(void)
 {
 	int err;
+	char modem_response[64];
+	
 
 	/* Wait for 2 seconds before talking to the LTE modem */
 	k_sleep(K_MSEC(2000));
@@ -274,10 +310,21 @@ int main(void)
 	set_bt_disabled ();
 
 	/* Setup LPUART for communication with LTE */
-	setup_lpuart(lpuart);
+	err = setup_lpuart(lpuart);
+	if (err) {
+		return err;
+	}
 	
-	/* Reed uuis from LTE */
-	read_uuid ();
+	/* Read the UUID from LTE before advertising. */
+	err = nrf_modem_uart_msg(modem_response, sizeof(modem_response), "uuid");
+	if (err < 0) {
+		LOG_ERR("Failed to read UUID from LTE (err: %d)", err);
+	} else if ((strncmp(modem_response, "+uuid: ", 7) != 0) ||
+		   (uuid_str_to_bytes(modem_response + 7, uuidBytes) != 0)) {
+		LOG_ERR("Invalid UUID response from LTE");
+	} else {
+		memcpy(adv_mfg_data.uuid_bytes, uuidBytes, sizeof(uuidBytes));
+	}
 
 	if (IS_ENABLED(CONFIG_BT_SMP)) {
 		err = bt_conn_auth_cb_register(&conn_auth_callbacks);
@@ -332,5 +379,3 @@ int main(void)
 	k_sleep(K_FOREVER);
 	return 0;
 }
-
-
